@@ -1,4 +1,8 @@
 pandas
+numpy
 matplotlib
 openpyxl
 jupyter
+scikit-learn
+catboost
+joblib

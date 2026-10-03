@@ -11,7 +11,9 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DATA_DIR = PROJECT_ROOT / "data"
-PROCESSED_DIR = DATA_DIR / "processed"
+UPDATED_DIR = DATA_DIR / "updated"
+
+UPDATED_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
@@ -19,12 +21,9 @@ PROCESSED_DIR = DATA_DIR / "processed"
 # ============================================================
 
 def safe_divide(numerator, denominator):
-    """
-    Divide two pandas Series while avoiding division by zero.
-    """
+    """Divide two pandas Series while avoiding division by zero."""
 
     denominator = denominator.replace(0, np.nan)
-
     return numerator / denominator
 
 
@@ -35,7 +34,7 @@ def safe_divide(numerator, denominator):
 def create_features(
     input_path,
     output_path,
-    player_name
+    player_name,
 ):
     """
     Create leakage-free historical features for one player's
@@ -43,6 +42,10 @@ def create_features(
 
     Every feature for Match N is calculated using only matches
     that happened BEFORE Match N.
+
+    Role is known before the match because it is determined by
+    the selected agent. ACS is never taken from the current match;
+    only historical ACS summaries are used.
     """
 
     print("\n" + "=" * 65)
@@ -55,10 +58,47 @@ def create_features(
 
     df = pd.read_csv(
         input_path,
-        parse_dates=["Date"]
+        parse_dates=["Date"],
     )
 
-    # Always make sure chronological order is preserved.
+    required_columns = [
+        "Match id",
+        "Date",
+        "Map",
+        "Agent",
+        "Role",
+        "Kills",
+        "Deaths",
+        "ACS",
+        "Result",
+        "Win Flag",
+        "Binary Target Eligible",
+    ]
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            f"Missing required cleaned columns: {missing_columns}"
+        )
+
+    # Ensure numeric columns are numeric after CSV import.
+    for column in [
+        "Kills",
+        "Deaths",
+        "ACS",
+        "Win Flag",
+    ]:
+        df[column] = pd.to_numeric(
+            df[column],
+            errors="coerce",
+        )
+
+    # Always preserve chronological order.
     df = (
         df
         .sort_values(
@@ -73,22 +113,17 @@ def create_features(
     # 2. INTERNAL CHRONOLOGICAL INDEX
     # --------------------------------------------------------
 
-    # Used only for calculating previous history / recency.
     df["_match_order"] = np.arange(len(df))
 
     # ========================================================
     # OVERALL PLAYER HISTORY
     # ========================================================
 
-    # Number of matches played BEFORE current match.
     df["previous_matches"] = df["_match_order"]
 
     # --------------------------------------------------------
     # 3. OVERALL PREVIOUS WIN RATE
     # --------------------------------------------------------
-
-    # shift(1) is critical:
-    # current match result is NEVER included.
 
     df["previous_win_rate"] = (
         df["Win Flag"]
@@ -100,12 +135,6 @@ def create_features(
     # --------------------------------------------------------
     # 4. OVERALL PREVIOUS K/D
     # --------------------------------------------------------
-
-    # We use:
-    #
-    # previous total kills / previous total deaths
-    #
-    # rather than averaging individual-match K/D values.
 
     previous_total_kills = (
         df["Kills"]
@@ -121,7 +150,7 @@ def create_features(
 
     df["previous_kd"] = safe_divide(
         previous_total_kills,
-        previous_total_deaths
+        previous_total_deaths,
     )
 
     # ========================================================
@@ -137,7 +166,7 @@ def create_features(
         .shift(1)
         .rolling(
             window=5,
-            min_periods=1
+            min_periods=1,
         )
         .mean()
     )
@@ -151,7 +180,7 @@ def create_features(
         .shift(1)
         .rolling(
             window=10,
-            min_periods=1
+            min_periods=1,
         )
         .mean()
     )
@@ -165,7 +194,7 @@ def create_features(
         .shift(1)
         .rolling(
             window=5,
-            min_periods=1
+            min_periods=1,
         )
         .sum()
     )
@@ -175,14 +204,14 @@ def create_features(
         .shift(1)
         .rolling(
             window=5,
-            min_periods=1
+            min_periods=1,
         )
         .sum()
     )
 
     df["recent_5_kd"] = safe_divide(
         recent_5_kills,
-        recent_5_deaths
+        recent_5_deaths,
     )
 
     # --------------------------------------------------------
@@ -194,7 +223,7 @@ def create_features(
         .shift(1)
         .rolling(
             window=10,
-            min_periods=1
+            min_periods=1,
         )
         .sum()
     )
@@ -204,14 +233,14 @@ def create_features(
         .shift(1)
         .rolling(
             window=10,
-            min_periods=1
+            min_periods=1,
         )
         .sum()
     )
 
     df["recent_10_kd"] = safe_divide(
         recent_10_kills,
-        recent_10_deaths
+        recent_10_deaths,
     )
 
     # --------------------------------------------------------
@@ -223,7 +252,7 @@ def create_features(
         .shift(1)
         .rolling(
             window=5,
-            min_periods=1
+            min_periods=1,
         )
         .mean()
     )
@@ -237,7 +266,7 @@ def create_features(
         .shift(1)
         .rolling(
             window=10,
-            min_periods=1
+            min_periods=1,
         )
         .mean()
     )
@@ -290,22 +319,122 @@ def create_features(
 
     df["agent_previous_kd"] = safe_divide(
         agent_previous_kills,
-        agent_previous_deaths
+        agent_previous_deaths,
     )
 
     # --------------------------------------------------------
     # 14. PREVIOUS AGENT ACS
     # --------------------------------------------------------
 
-    agent_previous_acs_sum = (
-        df.groupby("Agent")["ACS"]
-        .cumsum()
-        - df["ACS"]
+    df["agent_previous_acs"] = (
+        df
+        .groupby("Agent")["ACS"]
+        .transform(
+            lambda series:
+            series
+            .shift(1)
+            .expanding()
+            .mean()
+        )
     )
 
-    df["agent_previous_acs"] = safe_divide(
-        agent_previous_acs_sum,
-        df["agent_previous_matches"]
+    # ========================================================
+    # ROLE HISTORY
+    # ========================================================
+
+    # The current Role itself is pre-match information because
+    # the selected agent determines the official role.
+
+    # --------------------------------------------------------
+    # 15. PREVIOUS MATCHES WITH CURRENT ROLE
+    # --------------------------------------------------------
+
+    df["role_previous_matches"] = (
+        df
+        .groupby("Role")
+        .cumcount()
+    )
+
+    # --------------------------------------------------------
+    # 16. PREVIOUS ROLE WIN RATE
+    # --------------------------------------------------------
+
+    df["role_previous_win_rate"] = (
+        df
+        .groupby("Role")["Win Flag"]
+        .transform(
+            lambda series:
+            series
+            .shift(1)
+            .expanding()
+            .mean()
+        )
+    )
+
+    # --------------------------------------------------------
+    # 17. PREVIOUS ROLE K/D
+    # --------------------------------------------------------
+
+    role_previous_kills = (
+        df.groupby("Role")["Kills"]
+        .cumsum()
+        - df["Kills"]
+    )
+
+    role_previous_deaths = (
+        df.groupby("Role")["Deaths"]
+        .cumsum()
+        - df["Deaths"]
+    )
+
+    df["role_previous_kd"] = safe_divide(
+        role_previous_kills,
+        role_previous_deaths,
+    )
+
+    # --------------------------------------------------------
+    # 18. PREVIOUS ROLE ACS
+    # --------------------------------------------------------
+
+    # IMPORTANT:
+    # This is historical ACS for the role only. The current
+    # match ACS is shifted out and never used as input.
+
+    df["role_previous_acs"] = (
+        df
+        .groupby("Role")["ACS"]
+        .transform(
+            lambda series:
+            series
+            .shift(1)
+            .expanding()
+            .mean()
+        )
+    )
+
+    # --------------------------------------------------------
+    # 19. ROLE USAGE FREQUENCY
+    # --------------------------------------------------------
+
+    df["role_usage_frequency"] = safe_divide(
+        df["role_previous_matches"],
+        df["previous_matches"],
+    )
+
+    # --------------------------------------------------------
+    # 20. AGENT ACS RELATIVE TO ROLE ACS
+    # --------------------------------------------------------
+
+    # Positive value:
+    # the player's historical ACS with this agent is above
+    # their historical ACS baseline for the role.
+    #
+    # Negative value:
+    # the agent's historical ACS is below that role baseline.
+
+    df["agent_role_acs_delta"] = (
+        df["agent_previous_acs"]
+        - df["role_previous_acs"]
     )
 
     # ========================================================
@@ -313,7 +442,7 @@ def create_features(
     # ========================================================
 
     # --------------------------------------------------------
-    # 15. PREVIOUS MATCHES ON CURRENT MAP
+    # 21. PREVIOUS MATCHES ON CURRENT MAP
     # --------------------------------------------------------
 
     df["map_previous_matches"] = (
@@ -323,7 +452,7 @@ def create_features(
     )
 
     # --------------------------------------------------------
-    # 16. PREVIOUS MAP WIN RATE
+    # 22. PREVIOUS MAP WIN RATE
     # --------------------------------------------------------
 
     df["map_previous_win_rate"] = (
@@ -339,7 +468,7 @@ def create_features(
     )
 
     # --------------------------------------------------------
-    # 17. PREVIOUS MAP K/D
+    # 23. PREVIOUS MAP K/D
     # --------------------------------------------------------
 
     map_previous_kills = (
@@ -356,20 +485,20 @@ def create_features(
 
     df["map_previous_kd"] = safe_divide(
         map_previous_kills,
-        map_previous_deaths
+        map_previous_deaths,
     )
 
     # ========================================================
-    # AGENT × MAP HISTORY
+    # AGENT x MAP HISTORY
     # ========================================================
 
     agent_map_group = [
         "Agent",
-        "Map"
+        "Map",
     ]
 
     # --------------------------------------------------------
-    # 18. PREVIOUS AGENT × MAP MATCHES
+    # 24. PREVIOUS AGENT x MAP MATCHES
     # --------------------------------------------------------
 
     df["agent_map_previous_matches"] = (
@@ -379,7 +508,7 @@ def create_features(
     )
 
     # --------------------------------------------------------
-    # 19. PREVIOUS AGENT × MAP WIN RATE
+    # 25. PREVIOUS AGENT x MAP WIN RATE
     # --------------------------------------------------------
 
     df["agent_map_previous_win_rate"] = (
@@ -395,7 +524,7 @@ def create_features(
     )
 
     # --------------------------------------------------------
-    # 20. PREVIOUS AGENT × MAP K/D
+    # 26. PREVIOUS AGENT x MAP K/D
     # --------------------------------------------------------
 
     agent_map_previous_kills = (
@@ -414,7 +543,7 @@ def create_features(
 
     df["agent_map_previous_kd"] = safe_divide(
         agent_map_previous_kills,
-        agent_map_previous_deaths
+        agent_map_previous_deaths,
     )
 
     # ========================================================
@@ -422,29 +551,17 @@ def create_features(
     # ========================================================
 
     # --------------------------------------------------------
-    # 21. AGENT USAGE FREQUENCY
+    # 27. AGENT USAGE FREQUENCY
     # --------------------------------------------------------
-
-    # Example:
-    #
-    # Before current match:
-    #
-    # Previous total matches = 100
-    # Previous Sage matches = 40
-    #
-    # Agent Usage Frequency = 0.40
 
     df["agent_usage_frequency"] = safe_divide(
         df["agent_previous_matches"],
-        df["previous_matches"]
+        df["previous_matches"],
     )
 
     # --------------------------------------------------------
-    # 22. AGENT RECENCY
+    # 28. AGENT RECENCY
     # --------------------------------------------------------
-
-    # Find the global match position where this agent
-    # was previously played.
 
     df["previous_agent_match_order"] = (
         df
@@ -452,28 +569,21 @@ def create_features(
         .shift(1)
     )
 
-    # Number of matches since the agent was last used.
     df["agent_recency"] = (
         df["_match_order"]
         - df["previous_agent_match_order"]
     )
 
-    # First time using an agent -> no previous usage.
     df.loc[
         df["agent_previous_matches"] == 0,
-        "agent_recency"
+        "agent_recency",
     ] = np.nan
 
-    # ========================================================
-    # EXPERIENCE / FAMILIARITY FLAGS
-    # ========================================================
-
     # --------------------------------------------------------
-    # 23. AGENT EXPERIENCE LEVEL
+    # 29. AGENT EXPERIENCE LEVEL
     # --------------------------------------------------------
 
     def agent_experience_level(matches):
-
         if matches == 0:
             return "New"
 
@@ -497,15 +607,9 @@ def create_features(
     # TARGET
     # ========================================================
 
-    # Win Flag remains our supporting binary target:
-    #
-    # Win  = 1
-    # Loss = 0
-    # Draw = NaN
-    #
-    # IMPORTANT:
-    # Win Flag is NOT an input feature.
-    # It is the value the model learns to estimate.
+    # Win Flag is the supporting binary target:
+    # Win = 1, Loss = 0, Draw = NaN.
+    # It is NOT an input feature.
 
     # ========================================================
     # FINAL FEATURE DATASET
@@ -519,6 +623,7 @@ def create_features(
         # Current pre-match information
         "Map",
         "Agent",
+        "Role",
 
         # Overall historical information
         "previous_matches",
@@ -539,12 +644,20 @@ def create_features(
         "agent_previous_kd",
         "agent_previous_acs",
 
+        # Role history
+        "role_previous_matches",
+        "role_previous_win_rate",
+        "role_previous_kd",
+        "role_previous_acs",
+        "role_usage_frequency",
+        "agent_role_acs_delta",
+
         # Map history
         "map_previous_matches",
         "map_previous_win_rate",
         "map_previous_kd",
 
-        # Agent × Map history
+        # Agent x Map history
         "agent_map_previous_matches",
         "agent_map_previous_win_rate",
         "agent_map_previous_kd",
@@ -557,7 +670,7 @@ def create_features(
         # Target / reference
         "Result",
         "Win Flag",
-        "Binary Target Eligible"
+        "Binary Target Eligible",
     ]
 
     feature_df = df[
@@ -570,47 +683,36 @@ def create_features(
 
     print("\n--- FEATURE ENGINEERING SUMMARY ---")
 
-    print(
-        "Total rows:",
-        len(feature_df)
-    )
-
-    print(
-        "Total columns:",
-        len(feature_df.columns)
-    )
+    print("Total rows:", len(feature_df))
+    print("Total columns:", len(feature_df.columns))
 
     print(
         "\nBinary eligible matches:",
-        feature_df[
-            "Binary Target Eligible"
-        ].sum()
+        feature_df["Binary Target Eligible"].sum(),
     )
 
     print(
         "\nRows with no previous matches:",
-        (
-            feature_df["previous_matches"] == 0
-        ).sum()
+        (feature_df["previous_matches"] == 0).sum(),
     )
 
     print(
         "\nFirst-time agent usages:",
-        (
-            feature_df[
-                "agent_previous_matches"
-            ] == 0
-        ).sum()
+        (feature_df["agent_previous_matches"] == 0).sum(),
     )
 
     print(
-        "\nFirst-time Agent × Map combinations:",
-        (
-            feature_df[
-                "agent_map_previous_matches"
-            ] == 0
-        ).sum()
+        "\nFirst-time role usages:",
+        (feature_df["role_previous_matches"] == 0).sum(),
     )
+
+    print(
+        "\nFirst-time Agent x Map combinations:",
+        (feature_df["agent_map_previous_matches"] == 0).sum(),
+    )
+
+    print("\nRole counts:")
+    print(feature_df["Role"].value_counts())
 
     # ========================================================
     # SAVE FEATURES
@@ -619,7 +721,7 @@ def create_features(
     feature_df.to_csv(
         output_path,
         index=False,
-        encoding="utf-8-sig"
+        encoding="utf-8-sig",
     )
 
     print(
@@ -638,38 +740,28 @@ def create_features(
 
 if __name__ == "__main__":
 
-    # --------------------------------------------------------
-    # TANISHKA
-    # --------------------------------------------------------
-
+    # Tanishka
     create_features(
         input_path=(
-            PROCESSED_DIR
+            UPDATED_DIR
             / "competitive_matches_cleaned.csv"
         ),
-
         output_path=(
-            PROCESSED_DIR
+            UPDATED_DIR
             / "competitive_matches_features.csv"
         ),
-
-        player_name="Tanishka"
+        player_name="Tanishka",
     )
 
-    # --------------------------------------------------------
-    # DEV
-    # --------------------------------------------------------
-
+    # Dev
     create_features(
         input_path=(
-            PROCESSED_DIR
+            UPDATED_DIR
             / "competitive_matches_dev_cleaned.csv"
         ),
-
         output_path=(
-            PROCESSED_DIR
+            UPDATED_DIR
             / "competitive_matches_dev_features.csv"
         ),
-
-        player_name="Dev"
+        player_name="Dev",
     )

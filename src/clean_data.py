@@ -7,33 +7,78 @@ import pandas as pd
 # PROJECT PATHS
 # ============================================================
 
-# clean_data.py is located inside:
-# valorant_personal_coach/src/clean_data.py
-#
-# Therefore parents[1] gives the main project folder.
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DATA_DIR = PROJECT_ROOT / "data"
-PROCESSED_DIR = DATA_DIR / "processed"
-
-# Create the processed folder automatically if it does not exist.
-PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+UPDATED_DIR = DATA_DIR / "updated"
+UPDATED_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================
 # COLUMN RENAMING
 # ============================================================
 
-# The Excel files contain longer names for these columns.
-# We shorten them so they are easier to use later.
-
 COLUMN_RENAME_MAP = {
     "DDΔ (Average Damage Delta per Round)": "DDΔ",
     "HS% (Headshot Percentage)": "HS%",
     "ACS (Average Combat Score)": "ACS",
-    "TRS (Tracker Score)": "TRS",
 }
+
+
+# ============================================================
+# AGENT -> ROLE MAPPING
+# ============================================================
+
+AGENT_ROLE_MAP = {
+    # Duelists
+    "Iso": "Duelist",
+    "Jett": "Duelist",
+    "Neon": "Duelist",
+    "Phoenix": "Duelist",
+    "Raze": "Duelist",
+    "Reyna": "Duelist",
+    "Waylay": "Duelist",
+    "Yoru": "Duelist",
+
+    # Controllers
+    "Astra": "Controller",
+    "Brimstone": "Controller",
+    "Clove": "Controller",
+    "Harbor": "Controller",
+    "Miks": "Controller",
+    "Omen": "Controller",
+    "Viper": "Controller",
+
+    # Initiators
+    "Breach": "Initiator",
+    "Fade": "Initiator",
+    "Gekko": "Initiator",
+    "KAY/O": "Initiator",
+    "Skye": "Initiator",
+    "Sova": "Initiator",
+    "Tejo": "Initiator",
+
+    # Sentinels
+    "Chamber": "Sentinel",
+    "Cypher": "Sentinel",
+    "Deadlock": "Sentinel",
+    "Killjoy": "Sentinel",
+    "Sage": "Sentinel",
+    "Veto": "Sentinel",
+    "Vyse": "Sentinel",
+}
+
+VALID_ROLES = {
+    "Duelist",
+    "Controller",
+    "Initiator",
+    "Sentinel",
+}
+
+
+def expected_role(agent):
+    """Return the official role expected for an agent."""
+    return AGENT_ROLE_MAP.get(agent)
 
 
 # ============================================================
@@ -55,43 +100,21 @@ def classify_match_end(team_score, opponent_score, result):
     high_score = max(team_score, opponent_score)
     low_score = min(team_score, opponent_score)
 
-    # --------------------------------------------------------
-    # DRAW
-    # --------------------------------------------------------
-
     if result == "Draw":
-
-        # Standard overtime draw such as:
-        # 13-13, 14-14, 15-15, etc.
         if (
             team_score == opponent_score
             and team_score >= 13
         ):
             return "Overtime Draw"
 
-        # Example: unusual 2-2 draw
         return "Review"
 
-    # --------------------------------------------------------
-    # REGULATION
-    # --------------------------------------------------------
-
-    # Standard regulation win/loss:
-    # 13-0 through 13-11
     if (
         high_score == 13
         and low_score <= 11
     ):
         return "Regulation"
 
-    # --------------------------------------------------------
-    # OVERTIME
-    # --------------------------------------------------------
-
-    # Examples:
-    # 14-12
-    # 15-13
-    # 16-14
     if (
         high_score >= 14
         and low_score >= 12
@@ -99,12 +122,6 @@ def classify_match_end(team_score, opponent_score, result):
     ):
         return "Overtime"
 
-    # --------------------------------------------------------
-    # SURRENDER
-    # --------------------------------------------------------
-
-    # A Win/Loss ending at a non-standard score is treated
-    # as a surrendered / early-ended match.
     if result in ["Win", "Loss"]:
         return "Surrender"
 
@@ -116,18 +133,7 @@ def classify_match_end(team_score, opponent_score, result):
 # ============================================================
 
 def identify_surrendering_team(row):
-    """
-    Identify which side surrendered.
-
-    IMPORTANT:
-    We use the recorded Result rather than comparing the score.
-
-    Result = Win
-        -> Opponent Team surrendered
-
-    Result = Loss
-        -> Player Team surrendered
-    """
+    """Identify which side surrendered using the recorded result."""
 
     if row["Match End Type"] != "Surrender":
         return pd.NA
@@ -149,28 +155,33 @@ def clean_dataset(
     input_path,
     output_path,
     player_name,
-    header_row
+    header_row,
 ):
     """
-    Clean one player's VALORANT Competitive match history.
+    Clean one player's updated VALORANT Competitive match history.
 
-    The same cleaning methodology is used for both players,
-    but their datasets remain completely separate.
+    Important project rules:
+    - Tanishka and Dev remain separate datasets.
+    - TRS is no longer used.
+    - Role is a required categorical variable.
+    - The agent determines the official Role.
+    - ACS is retained as a performance statistic, but current-match ACS
+      is not used directly as a pre-match model feature later.
     """
 
-    print("\n" + "=" * 60)
-    print(f"Cleaning dataset for: {player_name}")
-    print("=" * 60)
+    print("\n" + "=" * 65)
+    print(f"Cleaning updated dataset for: {player_name}")
+    print("=" * 65)
 
     # ========================================================
-    # 1. LOAD DATA
+    # 1. LOAD UPDATED DATA
     # ========================================================
 
     df = pd.read_excel(
         input_path,
         sheet_name="Matches",
         header=header_row,
-        usecols="A:V"
+        usecols="A:V",
     )
 
     print(f"\nLoaded {len(df)} matches.")
@@ -194,6 +205,7 @@ def clean_dataset(
         "Date",
         "Map",
         "Agent",
+        "Role",
         "Team Score",
         "Opponent Score",
         "Result",
@@ -202,7 +214,6 @@ def clean_dataset(
         "Assists",
         "K/D",
         "ACS",
-        "TRS"
     ]
 
     missing_columns = [
@@ -216,6 +227,11 @@ def clean_dataset(
             f"Missing required columns: {missing_columns}"
         )
 
+    if "TRS" in df.columns:
+        raise ValueError(
+            "TRS is still present in the updated dataset. "
+            "Use the revised Role-aware Excel file."
+        )
 
     print("\nColumns:")
     print(df.columns.tolist())
@@ -238,24 +254,17 @@ def clean_dataset(
         "Map",
         "Placement",
         "Agent",
-        "Result"
+        "Role",
+        "Result",
     ]
 
     for column in text_columns:
-
         if column in df.columns:
-
             df[column] = (
                 df[column]
                 .astype("string")
                 .str.strip()
             )
-
-    # Standardize:
-    #
-    # win  -> Win
-    # LOSS -> Loss
-    # draw -> Draw
 
     df["Result"] = (
         df["Result"]
@@ -263,16 +272,73 @@ def clean_dataset(
     )
 
     # ========================================================
-    # 5. DATE CONVERSION
+    # 5. VALIDATE AGENT -> ROLE
+    # ========================================================
+
+    unknown_agents = sorted(
+        df.loc[
+            ~df["Agent"].isin(AGENT_ROLE_MAP),
+            "Agent",
+        ]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    if unknown_agents:
+        raise ValueError(
+            "Agents missing from AGENT_ROLE_MAP: "
+            f"{unknown_agents}"
+        )
+
+    invalid_roles = sorted(
+        df.loc[
+            ~df["Role"].isin(VALID_ROLES),
+            "Role",
+        ]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    if invalid_roles:
+        raise ValueError(
+            f"Invalid Role values found: {invalid_roles}"
+        )
+
+    expected_roles = df["Agent"].map(AGENT_ROLE_MAP)
+
+    role_mismatches = df[
+        df["Role"] != expected_roles
+    ]
+
+    if not role_mismatches.empty:
+        print("\nAgent/Role mismatches found:")
+        print(
+            role_mismatches[
+                ["Match id", "Agent", "Role"]
+            ].to_string(index=False)
+        )
+
+        raise ValueError(
+            "Role does not match the official Agent -> Role mapping."
+        )
+
+    # Reassign from the official map after validation so downstream
+    # files always use one consistent source of truth.
+    df["Role"] = expected_roles.astype("string")
+
+    # ========================================================
+    # 6. DATE CONVERSION
     # ========================================================
 
     df["Date"] = pd.to_datetime(
         df["Date"],
-        errors="coerce"
+        errors="coerce",
     )
 
     # ========================================================
-    # 6. CONVERT NUMERIC COLUMNS
+    # 7. CONVERT NUMERIC COLUMNS
     # ========================================================
 
     numeric_columns = [
@@ -289,20 +355,17 @@ def clean_dataset(
         "DDΔ",
         "HS%",
         "ACS",
-        "TRS",
     ]
 
     for column in numeric_columns:
-
         if column in df.columns:
-
             df[column] = pd.to_numeric(
                 df[column],
-                errors="coerce"
+                errors="coerce",
             )
 
     # ========================================================
-    # 7. CHECK DUPLICATES
+    # 8. CHECK DUPLICATES
     # ========================================================
 
     duplicate_rows = df.duplicated().sum()
@@ -314,17 +377,10 @@ def clean_dataset(
     )
 
     print("\nDuplicate rows:", duplicate_rows)
-
-    print(
-        "Duplicate Match IDs:",
-        duplicate_match_ids
-    )
+    print("Duplicate Match IDs:", duplicate_match_ids)
 
     if duplicate_match_ids > 0:
-
-        print(
-            "\nWARNING: Duplicate Match IDs detected:"
-        )
+        print("\nWARNING: Duplicate Match IDs detected:")
 
         print(
             df[
@@ -337,24 +393,24 @@ def clean_dataset(
                     "Date",
                     "Map",
                     "Agent",
-                    "Result"
+                    "Role",
+                    "Result",
                 ]
             ]
         )
 
         raise ValueError(
-            "Duplicate Match IDs found. "
-            "Check the original Excel file."
+            "Duplicate Match IDs found. Check the original Excel file."
         )
 
     # ========================================================
-    # 8. VALIDATE RESULT VALUES
+    # 9. VALIDATE RESULT VALUES
     # ========================================================
 
     valid_results = [
         "Win",
         "Loss",
-        "Draw"
+        "Draw",
     ]
 
     invalid_results = df[
@@ -362,17 +418,10 @@ def clean_dataset(
     ]
 
     if not invalid_results.empty:
-
-        print(
-            "\nUnexpected Result values found:"
-        )
-
+        print("\nUnexpected Result values found:")
         print(
             invalid_results[
-                [
-                    "Match id",
-                    "Result"
-                ]
+                ["Match id", "Result"]
             ]
         )
 
@@ -381,26 +430,20 @@ def clean_dataset(
         )
 
     # ========================================================
-    # 9. RECREATE WIN FLAG
+    # 10. RECREATE WIN FLAG
     # ========================================================
-
-    # We recreate Win Flag instead of trusting the Excel formula.
-    #
-    # Win  -> 1
-    # Loss -> 0
-    # Draw -> <NA>
 
     df["Win Flag"] = (
         df["Result"]
         .map({
             "Win": 1,
-            "Loss": 0
+            "Loss": 0,
         })
         .astype("Int64")
     )
 
     # ========================================================
-    # 10. RECOMPUTE SCORE MARGIN
+    # 11. RECOMPUTE SCORE MARGIN
     # ========================================================
 
     df["Score Margin"] = (
@@ -409,7 +452,7 @@ def clean_dataset(
     )
 
     # ========================================================
-    # 11. RECOMPUTE ROUNDS PLAYED
+    # 12. RECOMPUTE ROUNDS PLAYED
     # ========================================================
 
     df["Rounds Played"] = (
@@ -418,17 +461,8 @@ def clean_dataset(
     )
 
     # ========================================================
-    # 12. RECOMPUTE K/D
+    # 13. RECOMPUTE K/D
     # ========================================================
-
-    # K/D is undefined when Deaths = 0.
-    #
-    # Example:
-    # Kills = 4
-    # Deaths = 0
-    #
-    # We DO NOT create fake values such as:
-    # infinity, 999, 0.5, etc.
 
     df["K/D"] = (
         df["Kills"]
@@ -439,7 +473,7 @@ def clean_dataset(
     )
 
     # ========================================================
-    # 13. RECOMPUTE PER-ROUND STATISTICS
+    # 14. RECOMPUTE PER-ROUND STATISTICS
     # ========================================================
 
     valid_rounds = (
@@ -448,22 +482,19 @@ def clean_dataset(
     )
 
     df["Kills/Round"] = (
-        df["Kills"]
-        / valid_rounds
+        df["Kills"] / valid_rounds
     )
 
     df["Deaths/Round"] = (
-        df["Deaths"]
-        / valid_rounds
+        df["Deaths"] / valid_rounds
     )
 
     df["Assists/Round"] = (
-        df["Assists"]
-        / valid_rounds
+        df["Assists"] / valid_rounds
     )
 
     # ========================================================
-    # 14. DEATHLESS MATCH FLAG
+    # 15. DEATHLESS MATCH FLAG
     # ========================================================
 
     df["Deathless Match"] = (
@@ -471,144 +502,94 @@ def clean_dataset(
     ).astype(int)
 
     # ========================================================
-    # 15. CLASSIFY MATCH END TYPE
+    # 16. CLASSIFY MATCH END TYPE
     # ========================================================
 
     df["Match End Type"] = df.apply(
         lambda row: classify_match_end(
             row["Team Score"],
             row["Opponent Score"],
-            row["Result"]
+            row["Result"],
         ),
-        axis=1
+        axis=1,
     )
 
     # ========================================================
-    # 16. IDENTIFY SURRENDERING SIDE
+    # 17. IDENTIFY SURRENDERING SIDE
     # ========================================================
 
     df["Surrendered By"] = df.apply(
         identify_surrendering_team,
-        axis=1
+        axis=1,
     )
 
     # ========================================================
-    # 17. BINARY MODEL ELIGIBILITY
+    # 18. BINARY MODEL ELIGIBILITY
     # ========================================================
-
-    # Win/Loss matches:
-    # usable for supporting Win/Loss model
-    #
-    # Draw:
-    # retained for EDA but excluded from binary model
 
     df["Binary Target Eligible"] = (
         df["Result"]
-        .isin(
-            [
-                "Win",
-                "Loss"
-            ]
-        )
+        .isin(["Win", "Loss"])
         .astype(int)
     )
 
     # ========================================================
-    # 18. SORT CHRONOLOGICALLY
+    # 19. SORT CHRONOLOGICALLY
     # ========================================================
 
     df = (
         df
         .sort_values(
-            by=[
-                "Date",
-                "Match id"
-            ]
+            by=["Date", "Match id"]
         )
         .reset_index(drop=True)
     )
 
     # ========================================================
-    # 19. DATA QUALITY CHECKS
+    # 20. DATA QUALITY CHECKS
     # ========================================================
 
     print("\n--- DATA QUALITY CHECK ---")
 
-    print(
-        "Missing Dates:",
-        df["Date"].isna().sum()
-    )
-
-    print(
-        "Missing Maps:",
-        df["Map"].isna().sum()
-    )
-
-    print(
-        "Missing Agents:",
-        df["Agent"].isna().sum()
-    )
-
-    print(
-        "Missing Results:",
-        df["Result"].isna().sum()
-    )
-
-    print(
-        "Missing K/D:",
-        df["K/D"].isna().sum()
-    )
-
-    print(
-        "Missing Win Flag:",
-        df["Win Flag"].isna().sum()
-    )
+    print("Missing Dates:", df["Date"].isna().sum())
+    print("Missing Maps:", df["Map"].isna().sum())
+    print("Missing Agents:", df["Agent"].isna().sum())
+    print("Missing Roles:", df["Role"].isna().sum())
+    print("Missing Results:", df["Result"].isna().sum())
+    print("Missing K/D:", df["K/D"].isna().sum())
+    print("Missing ACS:", df["ACS"].isna().sum())
+    print("Missing Win Flag:", df["Win Flag"].isna().sum())
 
     # ========================================================
-    # 20. CLEANING SUMMARY
+    # 21. CLEANING SUMMARY
     # ========================================================
 
     print("\n--- CLEANING SUMMARY ---")
-
-    print(
-        f"\nPlayer: {player_name}"
-    )
-
-    print(
-        "Total matches:",
-        len(df)
-    )
+    print(f"\nPlayer: {player_name}")
+    print("Total matches:", len(df))
 
     print("\nResults:")
+    print(df["Result"].value_counts())
 
-    print(
-        df["Result"]
-        .value_counts()
-    )
+    print("\nRole distribution:")
+    print(df["Role"].value_counts())
 
     print("\nMatch End Types:")
-
-    print(
-        df["Match End Type"]
-        .value_counts()
-    )
+    print(df["Match End Type"].value_counts())
 
     print("\nSurrendered By:")
-
     print(
         df["Surrendered By"]
-        .value_counts(
-            dropna=True
-        )
+        .value_counts(dropna=True)
     )
 
     print(
         "\nBinary-model eligible matches:",
-        df["Binary Target Eligible"].sum()
+        df["Binary Target Eligible"].sum(),
     )
 
     # ========================================================
-    # 21. DISPLAY MATCHES REQUIRING REVIEW
+    # 22. DISPLAY MATCHES REQUIRING REVIEW
     # ========================================================
 
     review_matches = df[
@@ -616,11 +597,7 @@ def clean_dataset(
     ]
 
     if not review_matches.empty:
-
-        print(
-            "\nMatches requiring manual review:"
-        )
-
+        print("\nMatches requiring manual review:")
         print(
             review_matches[
                 [
@@ -628,29 +605,24 @@ def clean_dataset(
                     "Date",
                     "Map",
                     "Agent",
+                    "Role",
                     "Team Score",
                     "Opponent Score",
-                    "Result"
+                    "Result",
                 ]
-            ].to_string(
-                index=False
-            )
+            ].to_string(index=False)
         )
-
     else:
-
-        print(
-            "\nNo matches require manual review."
-        )
+        print("\nNo matches require manual review.")
 
     # ========================================================
-    # 22. SAVE CLEAN DATASET
+    # 23. SAVE CLEAN DATASET
     # ========================================================
 
     df.to_csv(
         output_path,
         index=False,
-        encoding="utf-8-sig"
+        encoding="utf-8-sig",
     )
 
     print(
@@ -658,7 +630,7 @@ def clean_dataset(
         f"\n{output_path}"
     )
 
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 65)
 
     return df
 
@@ -669,49 +641,30 @@ def clean_dataset(
 
 if __name__ == "__main__":
 
-    # ========================================================
-    # TANISHKA
-    # ========================================================
-
+    # Tanishka updated dataset
     clean_dataset(
         input_path=(
-            DATA_DIR
-            / "competitive_matches.xlsx"
+            UPDATED_DIR
+            / "competitive_matches_role_updated.xlsx"
         ),
-
         output_path=(
-            PROCESSED_DIR
+            UPDATED_DIR
             / "competitive_matches_cleaned.csv"
         ),
-
         player_name="Tanishka",
-
-        # Your Excel:
-        # row 1 = title
-        # row 2 = headers
-        header_row=1
+        header_row=1,
     )
 
-    # ========================================================
-    # DEV
-    # ========================================================
-
+    # Dev updated dataset
     clean_dataset(
         input_path=(
-            DATA_DIR
-            / "competitive_matches_dev.xlsx"
+            UPDATED_DIR
+            / "competitive_matches_dev_role_updated.xlsx"
         ),
-
         output_path=(
-            PROCESSED_DIR
+            UPDATED_DIR
             / "competitive_matches_dev_cleaned.csv"
         ),
-
         player_name="Dev",
-
-        # Dev Excel:
-        # row 1 = title
-        # row 2 = blank
-        # row 3 = headers
-        header_row=2
+        header_row=2,
     )
