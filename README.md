@@ -486,29 +486,13 @@ Dev:
 DEVnotebooks/DEV_01_data_exploration2.ipynb
 ```
 
-## 5. Run Model Training and Recommendation
-
-Tanishka:
-
-```text
-notebooks/02_model_training_role_updated.ipynb
-```
-
-Dev:
-
-```text
-DEVnotebooks/DEV_02_model_training_role_updated.ipynb
-```
-
-Running the modelling notebooks regenerates the corresponding files in
-`results/`.
 
 ---
 
 # ⚠️ Important Modelling Notes
 
 - The system is **personalized**, not a universal VALORANT tier list.
-- Tanishka and Dev are trained completely independently.
+- Tanishka's and Dev's datasets are trained completely independently.
 - Role is determined by **agent identity**, not ACS.
 - ACS is used only through historical information when making pre-match
   recommendations.
