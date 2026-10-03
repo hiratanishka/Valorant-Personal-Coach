@@ -79,7 +79,7 @@ with their historical ACS baseline for that agent's role.
 The project uses two independently maintained VALORANT Competitive match-history
 datasets.
 
-## Tanishka Dataset
+## Tanishka's Dataset
 
 - Total matches: **304**
 - Binary modelling matches: **294**
@@ -93,7 +93,7 @@ datasets.
   - Initiator: **31 matches**
   - Duelist: **3 matches**
 
-## Dev Dataset
+## Dev's Dataset
 
 - Total matches: **1080**
 - Binary modelling matches: **1055**
@@ -110,26 +110,26 @@ datasets.
 The two datasets are **never merged**.
 
 ```text
-Tanishka History
+Tanishka's History
         ↓
-Tanishka Cleaning
+Tanishka's Cleaning
         ↓
-Tanishka Historical Features
+Tanishka's Historical Features
         ↓
-Tanishka Models
+Tanishka's Models
         ↓
-Tanishka Recommendations
+Tanishka's Recommendations
 
 
-Dev History
+Dev's History
         ↓
-Dev Cleaning
+Dev's Cleaning
         ↓
-Dev Historical Features
+Dev's Historical Features
         ↓
-Dev Models
+Dev's Models
         ↓
-Dev Recommendations
+Dev's Recommendations
 ```
 
 One player's match history never contributes to the other player's model. This
@@ -397,18 +397,14 @@ valorant_personal_coach/
 │   └── updated/
 │       ├── competitive_matches_role_updated.xlsx
 │       ├── competitive_matches_dev_role_updated.xlsx
-│       ├── competitive_matches_cleaned.csv
-│       ├── competitive_matches_dev_cleaned.csv
-│       ├── competitive_matches_features.csv
-│       └── competitive_matches_dev_features.csv
-│
+│      
 ├── notebooks/
 │   ├── 01_data_exploration.ipynb
-│   └── 02_model_training_role_updated.ipynb
+│   └── 02_model_training_role_updated.ipynb (IN FUTURE)
 │
 ├── DEVnotebooks/
 │   ├── DEV_01_data_exploration2.ipynb
-│   └── DEV_02_model_training_role_updated.ipynb
+│   └── DEV_02_model_training_role_updated.ipynb (IN FUTURE)
 │
 ├── src/
 │   ├── clean_data.py
@@ -417,18 +413,7 @@ valorant_personal_coach/
 ├── figures/
 │
 ├── results/
-│   ├── tanishka_hyperparameter_tuning.csv
-│   ├── tanishka_validation_results.csv
-│   ├── tanishka_final_test_results.csv
-│   ├── tanishka_feature_importance.csv
-│   ├── tanishka_runtime_results.csv
-│   ├── tanishka_haven_recommendations.csv
-│   ├── dev_hyperparameter_tuning.csv
-│   ├── dev_validation_results.csv
-│   ├── dev_final_test_results.csv
-│   ├── dev_feature_importance.csv
-│   ├── dev_runtime_results.csv
-│   └── dev_haven_recommendations.csv
+│   ├── (IN FUTURE)
 │
 ├── README.md
 ├── requirements.txt
