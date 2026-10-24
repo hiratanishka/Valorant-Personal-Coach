@@ -1,0 +1,2 @@
+Model,Evaluated Matches,MRR,Hit@5,Hit@6
+Logistic Regression,158,0.454176998405356,0.7025316455696202,0.7088607594936709
