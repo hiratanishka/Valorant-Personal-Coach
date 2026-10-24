@@ -2,82 +2,74 @@
 
 ## Personalized Map-Based, Role-Aware Agent Recommendation Using Machine Learning
 
-**VALORANT Personal Coach** is a personalized machine-learning project that
-recommends VALORANT agents using an individual player's own Competitive match
-history.
+**VALORANT Personal Coach** is a personalized machine-learning project that recommends VALORANT agents using an individual player's own Competitive match history.
 
-Instead of relying on generic tier lists or global statistics, the system learns
-a separate gameplay profile for each player and uses the current map together
-with historical player information to estimate personalized agent suitability.
+Instead of relying on generic tier lists or global statistics, the system learns a separate gameplay profile for each player and uses the current map together with historical player information to estimate personalized agent suitability.
 
-The final recommendation layer is **role-aware**. Rather than returning one
-overall Top-5 or Top-6 list that may be dominated by a single role, the system
-can return up to **two recommended agents per role**:
+The final recommendation layer is **role-aware**. Rather than returning one overall Top-5 or Top-6 list that may be dominated by a single role, the system returns up to **two recommended agents per role**:
 
 - Duelist
 - Controller
 - Initiator
 - Sentinel
 
-The project currently contains two completely separate player pipelines:
-**Tanishka** and **Dev**.
+The project currently contains three completely separate player pipelines:
+
+- **Tanishka**
+- **Dev**
+- **Anuj**
+
+The current architecture is also designed so that additional standardized player datasets can be added later without changing the core cleaning and feature-engineering logic.
 
 ---
 
 # 🎯 Project Objective
 
-Given a VALORANT map, the system creates a historical candidate profile for
-each agent the player has previously used and estimates:
+Given a VALORANT map, the system creates a historical candidate profile for each agent the selected player has previously used and estimates:
 
 `P(Win | Map, Candidate Agent, Role, Historical Player Features)`
 
 The predicted win probability is used as the recommendation score.
 
-Agents are then ranked **within their respective roles**, allowing the final
-system to return up to **two personalized candidate agents per role**.
+Agents are then ranked **within their respective roles**, allowing the final system to return up to **two personalized candidate agents per role**.
 
-Only information that would have been available **before the target match** is
-used as model input.
+Only information that would have been available **before the target match** is used as model input.
 
-Current-match statistics such as kills, deaths, K/D, ACS, DDΔ, final score, and
-match-ending type are not used directly as pre-match predictors because doing so
-would introduce **data leakage**.
+Current-match statistics such as kills, deaths, K/D, ACS, DDΔ, final score, and match-ending type are not used directly as pre-match predictors because doing so would introduce **data leakage**.
 
-Instead, historical versions of relevant statistics are calculated using only
-matches that occurred before each target match.
+Instead, historical versions of relevant performance statistics are calculated using only matches that occurred before each target match.
 
 ---
 
-# 🔄 Updated Role-Aware Dataset Design
+# 🔄 Role-Aware Dataset Design
 
-The original datasets contained `TRS (Tracker Score)`. During project
-refinement, the data design was updated:
+The original raw Excel datasets contain match-level statistics, including `TRS (Tracker Score)`.
 
-- `TRS` was removed from the revised datasets and final modelling pipeline.
-- A categorical `Role` feature was added immediately after `Agent`.
-- Every agent is mapped to one official VALORANT role:
+During preprocessing:
+
+- `TRS` is removed from the final modelling pipeline.
+- A categorical `Role` feature is generated from the selected `Agent`.
+- Every supported agent is mapped to one official VALORANT role:
   - Duelist
   - Controller
   - Initiator
   - Sentinel
-- **The selected agent determines the official role.**
-- ACS does **not** determine role.
-- Historical ACS is retained as a performance signal and is also compared with
-  the player's historical ACS baseline for that role.
+- **Agent identity determines Role.**
+- ACS does **not** determine Role.
+- ACS is retained as a historical performance signal.
+- Current-match ACS is not used directly as a pre-match feature.
 
-One role-aware feature used by the pipeline is:
+One role-aware feature used by the project is:
 
 `agent_role_acs_delta = agent_previous_acs - role_previous_acs`
 
-This measures how the player's historical ACS with a specific agent compares
-with their historical ACS baseline for that agent's role.
+This compares the player's historical ACS with a specific agent against the player's historical ACS baseline for that agent's role.
 
 ---
 
 # 👥 Player-Specific Datasets
 
-The project uses two independently maintained VALORANT Competitive match-history
-datasets.
+The three player histories are kept completely separate.
 
 ## Tanishka Dataset
 
@@ -88,10 +80,10 @@ datasets.
 - Most-played agent: **Sage**
 - Dominant role: **Sentinel**
 - Role distribution:
-  - Sentinel: **205 matches**
-  - Controller: **65 matches**
-  - Initiator: **31 matches**
-  - Duelist: **3 matches**
+  - Sentinel: **205**
+  - Controller: **65**
+  - Initiator: **31**
+  - Duelist: **3**
 
 ## Dev Dataset
 
@@ -102,12 +94,26 @@ datasets.
 - Most-played agent: **Neon**
 - Dominant role: **Duelist**
 - Role distribution:
-  - Duelist: **885 matches**
-  - Controller: **98 matches**
-  - Sentinel: **69 matches**
-  - Initiator: **28 matches**
+  - Duelist: **885**
+  - Controller: **98**
+  - Sentinel: **69**
+  - Initiator: **28**
 
-The two datasets are **never merged**.
+## Anuj Dataset
+
+- Total matches: **715**
+- Binary modelling matches: **706**
+- Draws: **9**
+- Historically used agents: **19**
+- Most-played agent: **Cypher**
+- Dominant role: **Sentinel**
+- Role distribution:
+  - Sentinel: **429**
+  - Controller: **168**
+  - Duelist: **73**
+  - Initiator: **45**
+
+The datasets are **never merged**.
 
 ```text
 Tanishka History
@@ -130,49 +136,77 @@ Dev Historical Features
 Dev Models
         ↓
 Dev Recommendations
+
+
+Anuj History
+        ↓
+Anuj Cleaning
+        ↓
+Anuj Historical Features
+        ↓
+Anuj Models
+        ↓
+Anuj Recommendations
 ```
 
-One player's match history never contributes to the other player's model. This
-allows the system to learn distinct gameplay profiles and produce different
-recommendations for different players on the same map.
+One player's match history never contributes to another player's model.
+
+This allows the system to learn different gameplay profiles and produce different recommendations for different players on the same map.
 
 ---
 
 # 🧹 Data Cleaning Pipeline
 
-`src/clean_data.py` reads the revised Excel files from `data/updated/`:
+`src/clean_data.py` processes the raw Excel datasets stored directly inside `data/`.
 
-- `competitive_matches_role_updated.xlsx`
-- `competitive_matches_dev_role_updated.xlsx`
+Current raw files:
+
+```text
+data/competitive_matches.xlsx
+data/competitive_matches_dev.xlsx
+data/competitive_matches_anuj.xlsx
+```
 
 The cleaning pipeline:
 
+- automatically handles the configured player datasets,
+- detects the real header row,
+- normalizes column names,
+- removes `TRS` from the modelling dataset,
+- derives `Role` from the official Agent → Role mapping,
 - validates required columns,
-- validates the Agent → Role mapping,
+- validates supported agents,
 - verifies result values,
-- handles chronological dates,
+- converts dates and numerical fields,
+- checks duplicate rows and duplicate Match IDs,
 - recomputes Win Flag,
 - recomputes Score Margin and Rounds Played,
 - recomputes K/D and per-round statistics,
 - identifies deathless matches,
 - classifies match-ending type,
-- identifies surrendering side,
+- identifies the surrendering side,
 - marks binary-model eligibility,
 - sorts matches chronologically,
 - and performs data-quality checks.
 
-The cleaned datasets are saved back into `data/updated/`.
+The cleaned datasets are saved to:
+
+```text
+data/datasets/
+├── competitive_matches_tanishka_cleaned.csv
+├── competitive_matches_dev_cleaned.csv
+└── competitive_matches_anuj_cleaned.csv
+```
 
 ---
 
 # 🧠 Leakage-Free Historical Feature Engineering
 
-`src/feature_engineering.py` transforms the cleaned datasets into chronological,
-player-specific historical features.
+`src/feature_engineering.py` transforms each cleaned dataset into chronological, player-specific historical features.
 
-For every target match, only information from **earlier matches** is used.
+For every target match, information is calculated using only matches that happened **before** that target match.
 
-Examples include:
+The generated feature datasets contain **36 columns**.
 
 ## Overall Historical Features
 
@@ -199,6 +233,15 @@ Examples include:
 - `agent_recency`
 - `agent_familiarity`
 
+## Role-Aware History
+
+- `role_previous_matches`
+- `role_previous_win_rate`
+- `role_previous_kd`
+- `role_previous_acs`
+- `role_usage_frequency`
+- `agent_role_acs_delta`
+
 ## Map History
 
 - `map_previous_matches`
@@ -211,27 +254,26 @@ Examples include:
 - `agent_map_previous_win_rate`
 - `agent_map_previous_kd`
 
-## Role-Aware History
+Generated feature files:
 
-- `role_previous_matches`
-- `role_previous_win_rate`
-- `role_previous_kd`
-- `role_previous_acs`
-- `role_usage_frequency`
-- `agent_role_acs_delta`
-
-The generated feature datasets currently contain **36 columns** for each player.
+```text
+data/datasets/
+├── competitive_matches_tanishka_features.csv
+├── competitive_matches_dev_features.csv
+└── competitive_matches_anuj_features.csv
+```
 
 ---
 
 # 🤖 Machine-Learning Models
 
-Three substantially different classification algorithms are trained and
-evaluated independently for each player:
+Three substantially different classification algorithms are trained and evaluated independently for every player:
 
 1. **Logistic Regression**
 2. **Random Forest Classifier**
 3. **CatBoost Classifier**
+
+Each player's notebook folder contains one notebook for each algorithm.
 
 The categorical model inputs include:
 
@@ -240,12 +282,52 @@ The categorical model inputs include:
 - Role
 - Agent familiarity
 
-Logistic Regression and Random Forest use preprocessing with one-hot encoding,
-while CatBoost can work with categorical features in its own modelling pipeline.
+The remaining model inputs are leakage-free numerical historical features.
 
-Hyperparameter tuning and model selection are performed using chronological
-training and validation data. The held-out test period is kept separate from
-model selection.
+Logistic Regression and Random Forest use preprocessing with one-hot encoding. CatBoost handles categorical variables through its own modelling pipeline.
+
+---
+
+# ⏳ Chronological Training Strategy
+
+The project uses chronological splitting instead of a random train-test split.
+
+The modelling notebooks use approximately:
+
+```text
+70% Training
+15% Validation
+15% Test
+```
+
+The earliest matches are used for training, the following period is used for validation and hyperparameter selection, and the most recent period is kept as the held-out test set.
+
+This better represents the real use case:
+
+```text
+Past matches
+      ↓
+Learn player behaviour
+      ↓
+Predict / recommend for later matches
+```
+
+The held-out test set is not used for model selection.
+
+---
+
+# ⚙️ Hyperparameter Tuning
+
+Each modelling notebook performs algorithm-specific hyperparameter tuning using chronological training and validation data.
+
+The project primarily compares ranking performance using:
+
+- **Hit@6**
+- **MRR**
+
+The selected configuration is then fitted on the appropriate historical training data before final held-out evaluation.
+
+Because the models have different structures, their tuning spaces are intentionally different.
 
 ---
 
@@ -257,20 +339,16 @@ The project uses retrospective ranking metrics:
 - **Hit@5**
 - **Hit@6**
 
-These metrics evaluate where the agent that was historically selected appears
-inside the model's raw candidate ranking.
+These metrics evaluate where the agent that was historically selected appears inside the model's raw candidate ranking.
 
-They are **not the same as the final recommendation display**.
+They are **not the same as the final user-facing recommendation display**.
 
-The final user-facing recommendation layer is role-aware and returns up to
-**two agents per role**.
-
-This distinction is important:
+The final recommendation layer is role-aware and returns up to **two agents per role**.
 
 ```text
 Raw model ranking
       ↓
-Retrospective Hit@5 / Hit@6 / MRR evaluation
+Retrospective Hit@5 / Hit@6 / MRR
       ↓
 Role-aware ranking
       ↓
@@ -279,48 +357,9 @@ Top 2 candidate agents within each role
 
 ---
 
-# 🏁 Current Final Results
-
-## Tanishka
-
-Final selected model: **CatBoost**
-
-Held-out test performance:
-
-- Evaluated matches: **45**
-- MRR: **0.1934**
-- Hit@5: **26.67%**
-- Hit@6: **44.44%**
-
-Recommendation runtime across the tested maps:
-
-- Average: approximately **0.048 seconds**
-- Maximum: approximately **0.073 seconds**
-
-## Dev
-
-Final selected model: **Random Forest**
-
-Held-out test performance:
-
-- Evaluated matches: **158**
-- MRR: **0.3576**
-- Hit@5: **70.25%**
-- Hit@6: **78.48%**
-
-Recommendation runtime across the tested maps:
-
-- Average: approximately **0.192 seconds**
-- Maximum: approximately **0.228 seconds**
-
-Both recommendation pipelines run well within the project's approximate
-**10–20 second response-time target**.
-
----
-
 # 🏆 Role-Aware Agent Recommendation System
 
-At recommendation time, the player provides the current map.
+At recommendation time, the player supplies the current map.
 
 Example:
 
@@ -328,64 +367,72 @@ Example:
 Map = Haven
 ```
 
-For every historically used candidate agent, the system constructs a profile
-containing the player's historical agent, map, Agent × Map, recent-form, and
-role-level features.
+For every historically used candidate agent, the system creates a candidate profile containing the player's historical:
+
+- overall performance,
+- recent form,
+- agent performance,
+- role performance,
+- map performance,
+- Agent × Map performance,
+- agent usage,
+- agent recency,
+- and agent familiarity.
+
+The model then estimates the candidate's personalized win probability.
 
 ```text
-Selected Map + Candidate Agent + Role
-                ↓
+Selected Map
+      ↓
+Candidate Agent
+      ↓
+Official Role
+      ↓
 Historical Player Features
-                ↓
-Selected ML Model
-                ↓
+      ↓
+Machine-Learning Model
+      ↓
 Predicted Win Probability
-                ↓
-Rank Within Role
-                ↓
-Up to Top 2 Agents per Role
+      ↓
+Rank Agents Within Each Role
+      ↓
+Top 2 Agents per Role
 ```
 
-## Example: Tanishka on Haven
-
-The current saved result returns:
-
-| Role | Rank | Agent |
-|---|---:|---|
-| Sentinel | 1 | Killjoy |
-| Sentinel | 2 | Sage |
-| Controller | 1 | Astra |
-| Controller | 2 | Clove |
-| Initiator | 1 | Breach |
-| Initiator | 2 | Skye |
-| Duelist | 1 | Reyna |
-
-Only one Duelist is returned because Tanishka's recorded Duelist history
-contains only one historically used candidate agent.
-
-## Example: Dev on Haven
-
-The current saved result returns:
-
-| Role | Rank | Agent |
-|---|---:|---|
-| Duelist | 1 | Phoenix |
-| Duelist | 2 | Jett |
-| Controller | 1 | Brimstone |
-| Controller | 2 | Clove |
-| Sentinel | 1 | Chamber |
-| Sentinel | 2 | Killjoy |
-| Initiator | 1 | Breach |
-| Initiator | 2 | Gekko |
-
-These examples demonstrate why the system is player-specific: the same map can
-produce different recommendations for different players.
+This means two different players can receive different recommendations for the same map.
 
 ---
 
-# 🗂️ Project Structure
+# 📁 Model Output Files
 
-Simplified structure of the current project:
+Each model notebook stores its outputs inside `results/`.
+
+The naming convention is:
+
+```text
+<player>_<model>_hyperparameter_tuning.csv
+<player>_<model>_validation_results.csv
+<player>_<model>_final_test_results.csv
+<player>_<model>_feature_importance.csv
+<player>_<model>_runtime_results.csv
+<player>_<model>_haven_recommendations.csv
+```
+
+Examples:
+
+```text
+dev_random_forest_final_test_results.csv
+anuj_catboost_feature_importance.csv
+dev_logistic_regression_haven_recommendations.csv
+```
+
+Keeping the player name and model name in every output filename prevents one experiment from overwriting another.
+
+Final numerical results are intentionally read from the generated CSV outputs rather than hard-coded into this README, because rerunning the pipeline or adding new datasets can change the metrics.
+
+---
+
+# 🗂️ Current Project Structure
 
 ```text
 valorant_personal_coach/
@@ -393,56 +440,55 @@ valorant_personal_coach/
 ├── data/
 │   ├── competitive_matches.xlsx
 │   ├── competitive_matches_dev.xlsx
+│   ├── competitive_matches_anuj.xlsx
 │   │
-│   └── updated/
-│       ├── competitive_matches_role_updated.xlsx
-│       ├── competitive_matches_dev_role_updated.xlsx
-│       ├── competitive_matches_cleaned.csv
+│   └── datasets/
+│       ├── competitive_matches_tanishka_cleaned.csv
+│       ├── competitive_matches_tanishka_features.csv
 │       ├── competitive_matches_dev_cleaned.csv
-│       ├── competitive_matches_features.csv
-│       └── competitive_matches_dev_features.csv
+│       ├── competitive_matches_dev_features.csv
+│       ├── competitive_matches_anuj_cleaned.csv
+│       └── competitive_matches_anuj_features.csv
 │
 ├── notebooks/
-│   ├── 01_data_exploration.ipynb
-│   └── 02_model_training_role_updated.ipynb
+│   ├── EDA.ipynb
+│   ├── 01_logistic_regression.ipynb
+│   ├── 02_random_forest.ipynb
+│   └── 03_catboost.ipynb
 │
 ├── DEVnotebooks/
-│   ├── DEV_01_data_exploration2.ipynb
-│   └── DEV_02_model_training_role_updated.ipynb
+│   ├── EDA.ipynb
+│   ├── 01_logistic_regression.ipynb
+│   ├── 02_random_forest.ipynb
+│   └── 03_catboost.ipynb
+│
+├── ANUJnotebooks/
+│   ├── EDA.ipynb
+│   ├── 01_logistic_regression.ipynb
+│   ├── 02_random_forest.ipynb
+│   └── 03_catboost.ipynb
 │
 ├── src/
 │   ├── clean_data.py
 │   └── feature_engineering.py
 │
-├── figures/
-│
 ├── results/
-│   ├── tanishka_hyperparameter_tuning.csv
-│   ├── tanishka_validation_results.csv
-│   ├── tanishka_final_test_results.csv
-│   ├── tanishka_feature_importance.csv
-│   ├── tanishka_runtime_results.csv
-│   ├── tanishka_haven_recommendations.csv
-│   ├── dev_hyperparameter_tuning.csv
-│   ├── dev_validation_results.csv
-│   ├── dev_final_test_results.csv
-│   ├── dev_feature_importance.csv
-│   ├── dev_runtime_results.csv
-│   └── dev_haven_recommendations.csv
+│   └── generated model-specific CSV outputs
 │
 ├── README.md
 ├── requirements.txt
 └── .gitignore
 ```
 
-Generated CatBoost training-log directories and Git metadata are omitted from the
-simplified tree above.
+`.git/`, `.vscode/`, notebook checkpoints, CatBoost training logs, and other local metadata are omitted from the simplified project tree.
 
 ---
 
 # ▶️ How to Run the Project
 
 ## 1. Install Dependencies
+
+From the project root:
 
 ```bash
 pip install -r requirements.txt
@@ -459,9 +505,9 @@ The project uses:
 - CatBoost
 - joblib
 
-## 2. Clean the Revised Datasets
+---
 
-From the project root:
+## 2. Clean All Configured Player Datasets
 
 ```bash
 python src/clean_data.py
@@ -470,11 +516,14 @@ python src/clean_data.py
 This generates:
 
 ```text
-data/updated/competitive_matches_cleaned.csv
-data/updated/competitive_matches_dev_cleaned.csv
+data/datasets/competitive_matches_tanishka_cleaned.csv
+data/datasets/competitive_matches_dev_cleaned.csv
+data/datasets/competitive_matches_anuj_cleaned.csv
 ```
 
-## 3. Generate Historical Features
+---
+
+## 3. Generate Leakage-Free Historical Features
 
 ```bash
 python src/feature_engineering.py
@@ -483,61 +532,144 @@ python src/feature_engineering.py
 This generates:
 
 ```text
-data/updated/competitive_matches_features.csv
-data/updated/competitive_matches_dev_features.csv
+data/datasets/competitive_matches_tanishka_features.csv
+data/datasets/competitive_matches_dev_features.csv
+data/datasets/competitive_matches_anuj_features.csv
 ```
 
-## 4. Run Exploratory Analysis
+---
 
-Tanishka:
+## 4. Run Exploratory Data Analysis
+
+### Tanishka
 
 ```text
-notebooks/01_data_exploration.ipynb
+notebooks/EDA.ipynb
 ```
 
-Dev:
+### Dev
 
 ```text
-DEVnotebooks/DEV_01_data_exploration2.ipynb
+DEVnotebooks/EDA.ipynb
 ```
 
-## 5. Run Model Training and Recommendation
-
-Tanishka:
+### Anuj
 
 ```text
-notebooks/02_model_training_role_updated.ipynb
+ANUJnotebooks/EDA.ipynb
 ```
 
-Dev:
+---
+
+## 5. Run Logistic Regression
 
 ```text
-DEVnotebooks/DEV_02_model_training_role_updated.ipynb
+notebooks/01_logistic_regression.ipynb
+DEVnotebooks/01_logistic_regression.ipynb
+ANUJnotebooks/01_logistic_regression.ipynb
 ```
 
-Running the modelling notebooks regenerates the corresponding files in
-`results/`.
+---
+
+## 6. Run Random Forest
+
+```text
+notebooks/02_random_forest.ipynb
+DEVnotebooks/02_random_forest.ipynb
+ANUJnotebooks/02_random_forest.ipynb
+```
+
+---
+
+## 7. Run CatBoost
+
+```text
+notebooks/03_catboost.ipynb
+DEVnotebooks/03_catboost.ipynb
+ANUJnotebooks/03_catboost.ipynb
+```
+
+Running a model notebook regenerates that player-model combination's files inside `results/`.
+
+---
+
+# 🔧 Expected Dataset Configuration
+
+Each player-specific model notebook should point to the standardized files inside `data/datasets/`.
+
+## Tanishka
+
+```python
+PLAYER_NAME = "Tanishka"
+RESULT_PREFIX = "tanishka"
+
+CLEANED_FILENAME = "competitive_matches_tanishka_cleaned.csv"
+FEATURE_FILENAME = "competitive_matches_tanishka_features.csv"
+```
+
+## Dev
+
+```python
+PLAYER_NAME = "Dev"
+RESULT_PREFIX = "dev"
+
+CLEANED_FILENAME = "competitive_matches_dev_cleaned.csv"
+FEATURE_FILENAME = "competitive_matches_dev_features.csv"
+```
+
+## Anuj
+
+```python
+PLAYER_NAME = "Anuj"
+RESULT_PREFIX = "anuj"
+
+CLEANED_FILENAME = "competitive_matches_anuj_cleaned.csv"
+FEATURE_FILENAME = "competitive_matches_anuj_features.csv"
+```
+
+The model notebooks should use:
+
+```python
+DATASETS_DIR = PROJECT_ROOT / "data" / "datasets"
+```
+
+The old `data/updated/` path is no longer part of the current project structure.
 
 ---
 
 # ⚠️ Important Modelling Notes
 
 - The system is **personalized**, not a universal VALORANT tier list.
-- Tanishka and Dev are trained completely independently.
+- Tanishka, Dev, and Anuj are trained independently.
+- Player histories are never pooled.
 - Role is determined by **agent identity**, not ACS.
-- ACS is used only through historical information when making pre-match
-  recommendations.
-- `TRS` belongs only to the original EDA history and is not part of the revised
-  modelling pipeline.
+- `TRS` is not used in the final modelling pipeline.
+- Current-match ACS, K/D, kills, deaths, DDΔ, score, and other post-match values are not direct pre-match inputs.
+- Historical ACS is allowed because it is computed only from earlier matches.
 - Chronological feature engineering is used to reduce temporal leakage.
-- A player's sparse history with an agent, role, or Agent × Map combination may
-  make some recommendation estimates less reliable.
-- The historical dataset records only the result for the agent that was actually
-  selected. It does not contain the counterfactual outcome for agents that were
-  not selected.
+- Chronological train/validation/test splitting is used instead of random splitting.
+- Sparse history for a particular agent, role, map, or Agent × Map combination can make some recommendation estimates less reliable.
+- The historical dataset records the outcome only for the agent that was actually selected.
+- It does not contain the counterfactual outcome for agents that were not selected.
 
-Therefore, the system estimates **personal historical suitability** rather than
-proving which agent would objectively have been the optimal choice in a match.
+Therefore, the project estimates **personal historical suitability**, not a guaranteed objectively optimal agent choice.
+
+---
+
+# ➕ Adding More Player Datasets
+
+The project is designed to support more player histories.
+
+For an additional player:
+
+1. Place the raw Excel file inside `data/`.
+2. Add the player to the dataset configuration in `src/clean_data.py`.
+3. Add the corresponding player entry in `src/feature_engineering.py`.
+4. Run both scripts to generate the standardized cleaned and feature CSVs.
+5. Create or configure the player's EDA and model notebooks to point to the generated files.
+6. Use a unique `RESULT_PREFIX` so outputs remain separate.
+
+The same methodology can therefore be extended beyond the current three players.
 
 ---
 
@@ -552,17 +684,15 @@ Possible extensions include:
 - Additional map-context features
 - Larger personal match histories
 - More robust evaluation for sparse roles and rarely played agents
+- Automated selection of the strongest model per player
 - Real-time integration with an agent-select interface
 
 ---
 
 # 📌 Final Outcome
 
-The project demonstrates a complete end-to-end machine-learning workflow that
-converts personal VALORANT Competitive match history into a **role-aware,
-player-specific agent recommendation system**.
+The project demonstrates a complete end-to-end machine-learning workflow that converts personal VALORANT Competitive match history into a **role-aware, player-specific agent recommendation system**.
 
-For a supplied map, the final system uses historical information to estimate
-candidate-agent win probabilities and returns up to **two personalized agents
-per role**, allowing different players to receive different recommendations for
-the same map.
+For a supplied map, the system uses leakage-free historical information to estimate candidate-agent win probabilities and returns up to **two personalized agents per role**.
+
+Because every player is trained independently, the same map can produce different recommendations for Tanishka, Dev, Anuj, or any future player added to the pipeline.
